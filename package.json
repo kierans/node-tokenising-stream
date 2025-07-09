@@ -1,0 +1,33 @@
+{
+  "name": "event-piper",
+  "version": "0.1.0",
+  "description": "Transform stream that pushes events",
+  "main": "index.js",
+  "scripts": {
+    "test": "mocha test"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kierans/node-event-piper.git"
+  },
+  "keywords": [
+    "streams",
+    "transform",
+    "events"
+  ],
+  "files": [
+    "index.js",
+    "README.md"
+  ],
+  "author": "Kieran Simpson <kierans777@gmail.com>",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/kierans/node-event-piper/issues"
+  },
+  "homepage": "https://github.com/kierans/node-event-piper#readme",
+  "devDependencies": {
+    "@types/mocha": "^10.0.10",
+    "hamjest": "^4.1.0",
+    "mocha": "^11.7.1"
+  }
+}
