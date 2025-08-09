@@ -9,13 +9,19 @@ from a source and piped into the parser. For example, a file stream or a HTTP re
 stream. The parser stream forwards events from the wrapped parser to listeners registered on
 the stream; as streams are `EventEmitter`s.
 
-While the input to the parser stream respects [back-pressure][3], the output from the parser
-stream does not. Events break the back-pressure mechanism as many events could be emitted from
-a single chunk of input which could overflow a listener in a stream flow if data is flowing
-very slowly in the stream. If an error occurs during parsing, the input stream needs to be
-destroyed to stop reading more data. Streams provide a standard pattern in Node.js to handle
-back-pressure and errors. What is required is to have events from a parser stream respect
-back-pressure in a flow.
+While the input to the parser stream respects [back-pressure][3], the token events are not
+streamed but merely emitted synchronously, without any kind of flow control. A typical reason
+for choosing an event-driven parser is to avoid buffering the entire output, which in
+Javascript typically means something needs to be done with the tokens, such as streaming
+them elsewhere. However, simply writing the events to a stream ignores the back-pressure
+mechanism; many events could be emitted, which could overflow a downstream listener in a
+stream flow if data is flowing slowly, with no way to limit the fire hose upstream.
+
+If an error occurs during parsing, the input stream needs to be destroyed to stop
+reading more data.
+
+Streams provide a standard pattern in Node.js to handle back-pressure and errors. What is
+required is to have events from a parser stream respect back-pressure in a flow.
 
 `TokenisingStream` is a Transform stream that decorates a Writable stream representing a
 parser. Input to the transform is written to the delegate and events are collected.
