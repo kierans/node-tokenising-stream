@@ -26,8 +26,8 @@ const InflatingTransform = require("inflating-transform");
  */
 
 /**
- * @typedef {Function} ResultCallback A function which takes a {Result}
- * @param {Result} result The result
+ * @typedef {Function} OptionCallback A function which takes an {Optional}
+ * @param {Optional} option An Optional
  * @private
  */
 
@@ -36,7 +36,7 @@ const InflatingTransform = require("inflating-transform");
  * callback with the result.
  *
  * @typedef {Function} DelegateProxy
- * @param {ResultCallback} callback
+ * @param {OptionCallback} callback
  * @private
  */
 
@@ -68,54 +68,74 @@ class EventCollector {
 }
 
 /**
- * A simple sum type that encapsulates a result from an operation, which may be an error.
+ * @template {any} A
+ *
+ * @interface Optional<A>
+ *
+ * A simple sum type that encapsulates an Optional value or not.
  *
  * @private
  */
-class Result {
-	/**
-	 * @param {Error} [err] An optional error
-	 */
-	constructor(err) {
-		this._err = err;
-	}
 
-	/**
-	 * Returns a NodeCallback then when called will call the ResultCallback with a Result.
-	 *
-	 * @param {ResultCallback} callback
-	 * @return NodeCallback
-	 */
-	static toNodeCallback(callback) {
-		return (err) => { callback(new Result(err)) }
-	}
+/**
+ * Unwraps the Optional by calling `onNothing` if the Optional holds no value,
+ * or `onSomething` with the wrapped value
+ *
+ * @template {any} A
+ * @function
+ * @name Optional#either
+ * @param {() => void} onNothing
+ * @param {(A) => void} onSomething
+ */
 
+/**
+ * @param value
+ * @return Optional
+ * @constructor
+ */
+const Some = (value) => {
 	/**
-	 * Returns a ResultCallback then when called will call the NodeCallback.
-	 *
-	 * @param {NodeCallback} callback
-	 * @return ResultCallback
+	 * @implements Optional
 	 */
-	static fromNodeCallback(callback) {
-		return (result) => { result.either(callback, callback) }
-	}
-
-	/**
-	 * Unwraps the Result and executes the appropriate handler.
-	 *
-	 * @param {(Error) => void} onError
-	 * @param {() => void } onNoError
-	 */
-	either(onError, onNoError) {
-		if (this._err) {
-			onError(this._err)
-
-			return
+	return {
+		either(onNothing, onSomething) {
+			onSomething(value)
 		}
-
-		onNoError()
 	}
 }
+
+/**
+ * @return Optional
+ * @constructor
+ */
+const None = () => {
+	/**
+	 * @implements Optional
+	 */
+	return {
+		either(onNothing, _) {
+			onNothing()
+		}
+	}
+}
+
+/**
+ * Returns a NodeCallback that when called will call the OptionCallback with an Optional.
+ *
+ * @param {OptionCallback} callback
+ * @return NodeCallback
+ */
+const toNodeCallback = (callback) =>
+	(err) => { callback(err ? Some(err) : None()) }
+
+/**
+ * Returns an OptionCallback that when called will call the NodeCallback.
+ *
+ * @param {NodeCallback} callback
+ * @return OptionCallback
+ */
+const fromNodeCallback = (callback) =>
+	(optional) => { optional.either(callback, callback) }
 
 /**
  * A widespread pattern with streaming parsers is to emit events when tokens are parsed from an
@@ -203,18 +223,18 @@ class TokenisingStream extends InflatingTransform {
 			 * and the delegate write buffer overflows as we're ignoring the result from `write` and
 			 * will keep on writing chunks. However, in practice this would be unlikely to occur.
 			 */
-			this.delegate.write(chunk, encoding, Result.toNodeCallback(next))
+			this.delegate.write(chunk, encoding, toNodeCallback(next))
 		});
 	}
 
 	_flush(callback) {
-		/** @type ResultCallback */
-		const done = (result) =>
-			result.either(callback, () => { super._flush(callback) })
+		/** @type OptionCallback */
+		const done = (maybeError) =>
+			maybeError.either(() => { super._flush(callback) }, callback)
 
 		this._proxyToDelegate(
-			Result.toNodeCallback(done),
-			(next) => { this.delegate.end(Result.toNodeCallback(next)) }
+			toNodeCallback(done),
+			(next) => { this.delegate.end(toNodeCallback(next)) }
 		);
 	}
 
@@ -253,13 +273,13 @@ class TokenisingStream extends InflatingTransform {
 		this.collector.clear();
 		this.collector.startCollecting();
 
-		next((result) => {
+		next((maybeError) => {
 			this.collector.stopCollecting();
 
-			result.either(
-				done,
+			maybeError.either(
 				// if any events have been collected, push them.
-				() => { super._transform(this.collector.events, undefined, done) }
+				() => { super._transform(this.collector.events, undefined, done) },
+				done
 			);
 		});
 	}
