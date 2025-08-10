@@ -26,17 +26,18 @@ const InflatingTransform = require("inflating-transform");
  */
 
 /**
- * @typedef {Function} OptionCallback A function which takes an {Optional}
- * @param {Optional} option An Optional
+ * @template {any} A
+ * @typedef {Function} OptionCallback<A> A function which takes an {@link Optional}
+ * @param {Optional<A>} option An Optional
  * @private
  */
 
 /**
- * A `DelegateProxy` is a function that invokes an action on the delegate and calls the provided
- * callback with the result.
+ * A `NextFunction` is a function that executes an action and calls the provided callback with
+ * an optional error.
  *
- * @typedef {Function} DelegateProxy
- * @param {OptionCallback} callback
+ * @typedef {Function} NextFunction
+ * @param {OptionCallback<Error>} callback
  * @private
  */
 
@@ -217,14 +218,17 @@ class TokenisingStream extends InflatingTransform {
 	 * need to be changed.
 	 */
 	_transform(chunk, encoding, callback) {
-		this._proxyToDelegate(callback, (next) => {
+		/** @type NextFunction */
+		const writeToDelegate = (next) => {
 			/*
 			 * There is a theoretical pathological case here where the delegate never emits any tokens
 			 * and the delegate write buffer overflows as we're ignoring the result from `write` and
 			 * will keep on writing chunks. However, in practice this would be unlikely to occur.
 			 */
 			this.delegate.write(chunk, encoding, toNodeCallback(next))
-		});
+		};
+
+		this._doWhileCollecting(writeToDelegate, callback);
 	}
 
 	_flush(callback) {
@@ -232,9 +236,12 @@ class TokenisingStream extends InflatingTransform {
 		const done = (maybeError) =>
 			maybeError.either(() => { super._flush(callback) }, callback)
 
-		this._proxyToDelegate(
-			toNodeCallback(done),
-			(next) => { this.delegate.end(toNodeCallback(next)) }
+		/** @type NextFunction */
+		const closeDelegate = (next) => { this.delegate.end(toNodeCallback(next)) };
+
+		this._doWhileCollecting(
+			closeDelegate,
+			toNodeCallback(done)
 		);
 	}
 
@@ -261,15 +268,16 @@ class TokenisingStream extends InflatingTransform {
 	}
 
 	/**
-	 * `_proxyToDelegate` is a method which wraps an action on the delegate Writable.
+	 * `_doWhileCollecting` is a method which wraps an action while collecting events.
+	 *
 	 * This method takes care of collecting and pushing any events that are emitted from the
 	 * delegate during the call the `next`
 	 *
+	 * @param {NextFunction} next What action to do
 	 * @param {NodeCallback} done What to do when finished.
-	 * @param {DelegateProxy} next What action to take on the delegate
 	 * @private
 	 */
-	_proxyToDelegate(done, next) {
+	_doWhileCollecting(next, done) {
 		this.collector.clear();
 		this.collector.startCollecting();
 
