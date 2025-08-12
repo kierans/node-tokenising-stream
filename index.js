@@ -6,8 +6,17 @@ const InflatingTransform = require("inflating-transform");
  */
 
 /**
+ * @event EventAdaptor#error
+ * @type {Error}
+ */
+
+/**
  * @interface EventAdaptor
  * @fires EventAdaptor#token
+ * @fires EventAdaptor#error
+ *
+ * If the EventAdaptor fires an `error` event, the TokenisingStream will be destroyed with
+ * the emitted error.
  */
 
 /**
@@ -41,6 +50,7 @@ const InflatingTransform = require("inflating-transform");
  * @private
  */
 
+const ERROR_EVENT_NAME = "error";
 const TOKEN_EVENT_NAME = "token";
 
 /**
@@ -50,17 +60,31 @@ class EventCollector {
 	constructor(adaptor) {
 		this.adaptor = adaptor;
 		this.events = [];
-		this.collector = (event) => {
+		this.error = None();
+
+		/*
+		 * Use functions as props so that `this` can be used correctly,
+		 * and the function reference can be used to stop listening.
+		 */
+		this._onToken = (event) => {
 			this.events.push(event);
+		}
+
+		this._onError = (err) => {
+			this.stopCollecting();
+
+			this.error = Some(err);
 		}
 	}
 
 	startCollecting() {
-		this.adaptor.on(TOKEN_EVENT_NAME, this.collector)
+		this.adaptor.on(ERROR_EVENT_NAME, this._onError);
+		this.adaptor.on(TOKEN_EVENT_NAME, this._onToken);
 	}
 
 	stopCollecting() {
-		this.adaptor.off(TOKEN_EVENT_NAME, this.collector)
+		this.adaptor.off(TOKEN_EVENT_NAME, this._onToken);
+		this.adaptor.off(ERROR_EVENT_NAME, this._onError)
 	}
 
 	clear() {
@@ -99,6 +123,7 @@ const Some = (value) => {
 	 * @implements Optional
 	 */
 	return {
+		_tag: "Some",
 		either(onNothing, onSomething) {
 			onSomething(value)
 		}
@@ -114,6 +139,7 @@ const None = () => {
 	 * @implements Optional
 	 */
 	return {
+		_tag: "None",
 		either(onNothing, _) {
 			onNothing()
 		}
@@ -172,7 +198,8 @@ const fromNodeCallback = (callback) =>
  * `TokenisingStream` generic, an `EventAdaptor` must be provided using the `adaptor` constructor
  * option. The adaptor is responsible for collecting events from the delegate and emitting them
  * via the `token` event for collection by the stream. If an error occurs in the delegate
- * writing a chunk, the error will be passed to the `_transform` callback.
+ * writing a chunk, the error will be passed to the `_transform` callback. If an error event
+ * is emitted by the event adaptor, it will be passed to the `_transform` callback.
  *
  * When the `TokenisingStream` instance is closed/flushed it will end the delegate Writable.
  * As this may see more events emitted, the stream will collect and push them before closing
@@ -259,11 +286,11 @@ class TokenisingStream extends InflatingTransform {
 		 * emit the error as an event. If nothing is listening, the node runtime will treat it as an
 		 * uncaught error. We register an empty handler to avoid this.
 		 */
-		this.delegate.on("error", emptyHandler);
+		this.delegate.on(ERROR_EVENT_NAME, emptyHandler);
 
 		// on close, remove handlers.
 		this.delegate.once("close", () => {
-			this.delegate.off("error", emptyHandler)
+			this.delegate.off(ERROR_EVENT_NAME, emptyHandler)
 		});
 	}
 
@@ -278,18 +305,59 @@ class TokenisingStream extends InflatingTransform {
 	 * @private
 	 */
 	_doWhileCollecting(next, done) {
-		this.collector.clear();
-		this.collector.startCollecting();
+		this._startCollectingTokens();
 
 		next((maybeError) => {
-			this.collector.stopCollecting();
+			this._stopCollectingTokens();
 
-			maybeError.either(
-				// if any events have been collected, push them.
-				() => { super._transform(this.collector.events, undefined, done) },
-				done
-			);
+			maybeError.either(() => { this._pushCollectedTokens(done) }, done);
 		});
+	}
+
+	/**
+	 * @param {NodeCallback} callback
+	 * @private
+	 */
+	_checkCollectorForError(callback) {
+		this.collector.error.either(callback, callback)
+	}
+
+	/**
+	 * @private
+	 */
+	_collectedTokens() {
+		return this.collector.events;
+	}
+
+	/**
+	 * Pushes any collected tokens through the stream.
+	 *
+	 * @param {NodeCallback} callback
+	 * @private
+	 */
+	_pushCollectedTokens(callback) {
+		super._transform(
+			this._collectedTokens(),
+			undefined,
+			toNodeCallback((maybeError) => {
+				maybeError.either(() => { this._checkCollectorForError(callback) }, callback)
+			})
+		)
+	}
+
+	/**
+	 * @private
+	 */
+	_startCollectingTokens() {
+		this.collector.clear();
+		this.collector.startCollecting();
+	}
+
+	/**
+	 * @private
+	 */
+	_stopCollectingTokens() {
+		this.collector.stopCollecting();
 	}
 }
 

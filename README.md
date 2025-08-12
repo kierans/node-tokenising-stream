@@ -35,7 +35,8 @@ The delegate Writable must be provided using the `delegate` constructor option. 
 `TokenisingStream` generic, an `EventAdaptor` must be provided using the `adaptor` constructor
 option. The adaptor is responsible for collecting events from the delegate and emitting them
 via the `token` event for collection by the stream. If an error occurs in the delegate
-writing a chunk, the error will be passed to the `_transform` callback.
+writing a chunk, the error will be passed to the `_transform` callback. If an error event
+is emitted by the event adaptor, it will be passed to the `_transform` callback.
 
 When the `TokenisingStream` instance is closed/flushed it will end the delegate Writable.
 As this may see more events emitted, the stream will collect and push them before closing
