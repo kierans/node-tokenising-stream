@@ -35,21 +35,15 @@ const InflatingTransform = require("inflating-transform");
  */
 
 /**
- * @template {any} A
- * @typedef {Function} OptionCallback<A> A function which takes an {@link Optional}
- * @param {Optional<A>} option An Optional
- * @private
- */
-
-/**
- * A `NextFunction` is a function that executes an action and calls the provided callback with
- * an optional error.
+ * A `NextFunction` is a function that returns a Promise that may reject with an Error or
+ * fulfill with undefined.
  *
  * @typedef {Function} NextFunction
- * @param {OptionCallback<Error>} callback
+ * @returns Promise
  * @private
  */
 
+const CLOSE_EVENT_NAME = "close";
 const ERROR_EVENT_NAME = "error";
 const TOKEN_EVENT_NAME = "token";
 
@@ -60,7 +54,7 @@ class EventCollector {
 	constructor(adaptor) {
 		this.adaptor = adaptor;
 		this.events = [];
-		this.error = None();
+		this.error = null;
 
 		/*
 		 * Use functions as props so that `this` can be used correctly,
@@ -73,7 +67,7 @@ class EventCollector {
 		this._onError = (err) => {
 			this.stopCollecting();
 
-			this.error = Some(err);
+			this.error = err;
 		}
 	}
 
@@ -93,76 +87,30 @@ class EventCollector {
 }
 
 /**
- * @template {any} A
+ * Promisifies a callback-accepting function to return a Promise.
  *
- * @interface Optional<A>
+ * Works by taking a function that accepts a `NodeCallback` as an argument. When the callback
+ * is invoked, the Promise will be settled. If the callback is invoked with an Error, the
+ * Promise will be rejected with that error. Else it is fulfilled with `undefined`.
  *
- * A simple sum type that encapsulates an Optional value or not.
+ * This can be used to chain callback accepting functions together as Promises have a
+ * well-defined interface for composing Promise returning functions together.
  *
+ * @param {(cb: NodeCallback) => void} fn
+ * @return {Promise<void>}
  * @private
  */
-
-/**
- * Unwraps the Optional by calling `onNothing` if the Optional holds no value,
- * or `onSomething` with the wrapped value
- *
- * @template {any} A
- * @function
- * @name Optional#either
- * @param {() => void} onNothing
- * @param {(A) => void} onSomething
- */
-
-/**
- * @param value
- * @return Optional
- * @constructor
- */
-const Some = (value) => {
-	/**
-	 * @implements Optional
-	 */
-	return {
-		_tag: "Some",
-		either(onNothing, onSomething) {
-			onSomething(value)
-		}
-	}
-}
-
-/**
- * @return Optional
- * @constructor
- */
-const None = () => {
-	/**
-	 * @implements Optional
-	 */
-	return {
-		_tag: "None",
-		either(onNothing, _) {
-			onNothing()
-		}
-	}
-}
-
-/**
- * Returns a NodeCallback that when called will call the OptionCallback with an Optional.
- *
- * @param {OptionCallback} callback
- * @return NodeCallback
- */
-const toNodeCallback = (callback) =>
-	(err) => { callback(err ? Some(err) : None()) }
-
-/**
- * Returns an OptionCallback that when called will call the NodeCallback.
- *
- * @param {NodeCallback} callback
- * @return OptionCallback
- */
-const fromNodeCallback = (callback) =>
-	(optional) => { optional.either(callback, callback) }
+const promisify = (fn) =>
+	new Promise((resolve, reject) => {
+		fn((err) => {
+			if (err) {
+				reject(err)
+			}
+			else {
+				resolve()
+			}
+		})
+	})
 
 /**
  * A widespread pattern with streaming parsers is to emit events when tokens are parsed from an
@@ -245,31 +193,16 @@ class TokenisingStream extends InflatingTransform {
 	 * need to be changed.
 	 */
 	_transform(chunk, encoding, callback) {
-		/** @type NextFunction */
-		const writeToDelegate = (next) => {
-			/*
-			 * There is a theoretical pathological case here where the delegate never emits any tokens
-			 * and the delegate write buffer overflows as we're ignoring the result from `write` and
-			 * will keep on writing chunks. However, in practice this would be unlikely to occur.
-			 */
-			this.delegate.write(chunk, encoding, toNodeCallback(next))
-		};
-
-		this._doWhileCollecting(writeToDelegate, callback);
+		this._doWhileCollecting(() => this._writeToDelegate(chunk, encoding), callback);
 	}
 
 	_flush(callback) {
-		/** @type OptionCallback */
-		const done = (maybeError) =>
-			maybeError.either(() => { super._flush(callback) }, callback)
+		/** @type NodeCallback */
+		const done = (err) => {
+			err ? callback(err) : super._flush(callback)
+		}
 
-		/** @type NextFunction */
-		const closeDelegate = (next) => { this.delegate.end(toNodeCallback(next)) };
-
-		this._doWhileCollecting(
-			closeDelegate,
-			toNodeCallback(done)
-		);
+		this._doWhileCollecting(() => this._closeDelegate(), done);
 	}
 
 	*_inflate(chunk, encoding) {
@@ -278,6 +211,38 @@ class TokenisingStream extends InflatingTransform {
 				chunk: item
 			}
 		}
+	}
+
+	_closeDelegate() {
+		return promisify((cb) => {
+			let err;
+
+			const onError = (e) => {
+				err = e
+			}
+
+			const onClose = () => {
+				this.delegate.off(ERROR_EVENT_NAME, onError);
+
+				cb(err);
+			}
+
+			this.delegate.on(ERROR_EVENT_NAME, onError);
+			this.delegate.once(CLOSE_EVENT_NAME, onClose);
+
+			this.delegate.end()
+		});
+	}
+
+	_writeToDelegate(chunk, encoding) {
+		/*
+		 * There is a theoretical pathological case here where the delegate never emits any tokens
+		 * and the delegate write buffer overflows as we're ignoring the result from `write` and
+		 * will keep on writing chunks. However, in practice this would be unlikely to occur.
+		 */
+		return promisify((cb) => {
+			this.delegate.write(chunk, encoding, cb)
+		})
 	}
 
 	_listenForDelegateEvents() {
@@ -289,7 +254,7 @@ class TokenisingStream extends InflatingTransform {
 		this.delegate.on(ERROR_EVENT_NAME, emptyHandler);
 
 		// on close, remove handlers.
-		this.delegate.once("close", () => {
+		this.delegate.once(CLOSE_EVENT_NAME, () => {
 			this.delegate.off(ERROR_EVENT_NAME, emptyHandler)
 		});
 	}
@@ -307,19 +272,24 @@ class TokenisingStream extends InflatingTransform {
 	_doWhileCollecting(next, done) {
 		this._startCollectingTokens();
 
-		next((maybeError) => {
-			this._stopCollectingTokens();
-
-			maybeError.either(() => { this._pushCollectedTokens(done) }, done);
-		});
+		next()
+			.then(() => this._stopCollectingTokens())
+			.then(() => this._pushCollectedTokens())
+			.then(done, done)
 	}
 
 	/**
-	 * @param {NodeCallback} callback
 	 * @private
 	 */
-	_checkCollectorForError(callback) {
-		this.collector.error.either(callback, callback)
+	_checkCollectorForError() {
+		return new Promise((resolve, reject) => {
+			if (this.collector.error) {
+				reject(this.collector.error)
+			}
+			else {
+				resolve()
+			}
+		})
 	}
 
 	/**
@@ -332,17 +302,11 @@ class TokenisingStream extends InflatingTransform {
 	/**
 	 * Pushes any collected tokens through the stream.
 	 *
-	 * @param {NodeCallback} callback
 	 * @private
 	 */
-	_pushCollectedTokens(callback) {
-		super._transform(
-			this._collectedTokens(),
-			undefined,
-			toNodeCallback((maybeError) => {
-				maybeError.either(() => { this._checkCollectorForError(callback) }, callback)
-			})
-		)
+	_pushCollectedTokens() {
+		return promisify((cb) => { super._transform(this._collectedTokens(), undefined, cb) })
+			.then(() => this._checkCollectorForError())
 	}
 
 	/**
