@@ -112,6 +112,8 @@ const promisify = (fn) =>
 		})
 	})
 
+const emptyHandler = () => {}
+
 /**
  * A widespread pattern with streaming parsers is to emit events when tokens are parsed from an
  * input string. Examples include SAX libraries, parse5 (HTML), and other streaming parsers on
@@ -214,6 +216,17 @@ class TokenisingStream extends InflatingTransform {
 		}
 	}
 
+	_writeToDelegate(chunk, encoding) {
+		/*
+		 * There is a theoretical pathological case here where the delegate never emits any tokens
+		 * and the delegate write buffer overflows as we're ignoring the result from `write` and
+		 * will keep on writing chunks. However, in practice this would be unlikely to occur.
+		 */
+		return promisify((cb) => {
+			this.delegate.write(chunk, encoding, cb)
+		})
+	}
+
 	_closeDelegate() {
 		return promisify((cb) => {
 			let err;
@@ -232,31 +245,6 @@ class TokenisingStream extends InflatingTransform {
 			this.delegate.once(CLOSE_EVENT_NAME, onClose);
 
 			this.delegate.end()
-		});
-	}
-
-	_writeToDelegate(chunk, encoding) {
-		/*
-		 * There is a theoretical pathological case here where the delegate never emits any tokens
-		 * and the delegate write buffer overflows as we're ignoring the result from `write` and
-		 * will keep on writing chunks. However, in practice this would be unlikely to occur.
-		 */
-		return promisify((cb) => {
-			this.delegate.write(chunk, encoding, cb)
-		})
-	}
-
-	_listenForDelegateEvents() {
-		/*
-		 * Node streams not only pass the error to the callback passed to `write`, but will also
-		 * emit the error as an event. If nothing is listening, the node runtime will treat it as an
-		 * uncaught error. We register an empty handler to avoid this.
-		 */
-		this.delegate.on(ERROR_EVENT_NAME, emptyHandler);
-
-		// on close, remove handlers.
-		this.delegate.once(CLOSE_EVENT_NAME, () => {
-			this.delegate.off(ERROR_EVENT_NAME, emptyHandler)
 		});
 	}
 
@@ -293,11 +281,18 @@ class TokenisingStream extends InflatingTransform {
 		})
 	}
 
-	/**
-	 * @private
-	 */
-	_collectedTokens() {
-		return this.collector.events;
+	_listenForDelegateEvents() {
+		/*
+		 * Node streams not only pass the error to the callback passed to `write`, but will also
+		 * emit the error as an event. If nothing is listening, the node runtime will treat it as an
+		 * uncaught error. We register an empty handler to avoid this.
+		 */
+		this.delegate.on(ERROR_EVENT_NAME, emptyHandler);
+
+		// on close, remove handlers.
+		this.delegate.once(CLOSE_EVENT_NAME, () => {
+			this.delegate.off(ERROR_EVENT_NAME, emptyHandler)
+		});
 	}
 
 	/**
@@ -308,6 +303,13 @@ class TokenisingStream extends InflatingTransform {
 	_pushCollectedTokens() {
 		return promisify((cb) => { super._transform(this._collectedTokens(), undefined, cb) })
 			.then(() => this._checkCollectorForError())
+	}
+
+	/**
+	 * @private
+	 */
+	_collectedTokens() {
+		return this.collector.events;
 	}
 
 	/**
@@ -325,7 +327,5 @@ class TokenisingStream extends InflatingTransform {
 		this.collector.stopCollecting();
 	}
 }
-
-const emptyHandler = () => {}
 
 module.exports = TokenisingStream;
