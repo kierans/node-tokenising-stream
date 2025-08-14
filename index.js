@@ -223,7 +223,17 @@ class TokenisingStream extends InflatingTransform {
 		 * will keep on writing chunks. However, in practice this would be unlikely to occur.
 		 */
 		return promisify((cb) => {
-			this.delegate.write(chunk, encoding, cb)
+			/*
+			 * Some parser libraries aren't true Writable's (eg: sax). They duck type the `write` and
+			 * `end` methods but don't honour the callback.
+			 */
+			if (this.delegate.write.length < 3) {
+				this.delegate.write(chunk, encoding);
+				cb()
+			}
+			else {
+				this.delegate.write(chunk, encoding, cb);
+			}
 		})
 	}
 
