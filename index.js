@@ -158,6 +158,7 @@ const promisify = (fn) =>
  * [3]: https://nodejs.org/en/learn/modules/backpressuring-in-streams
  */
 class TokenisingStream extends InflatingTransform {
+	static ERROR_EVENT_NAME = ERROR_EVENT_NAME;
 	static TOKEN_EVENT_NAME = TOKEN_EVENT_NAME;
 
 	/**
