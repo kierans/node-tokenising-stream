@@ -6,8 +6,17 @@ const InflatingTransform = require("inflating-transform");
  */
 
 /**
+ * @event EventAdaptor#error
+ * @type {Error}
+ */
+
+/**
  * @interface EventAdaptor
  * @fires EventAdaptor#token
+ * @fires EventAdaptor#error
+ *
+ * If the EventAdaptor fires an `error` event, the TokenisingStream will be destroyed with
+ * the emitted error.
  */
 
 /**
@@ -26,21 +35,16 @@ const InflatingTransform = require("inflating-transform");
  */
 
 /**
- * @template {any} A
- * @typedef {Function} OptionCallback<A> A function which takes an {@link Optional}
- * @param {Optional<A>} option An Optional
- * @private
- */
-
-/**
- * A `NextFunction` is a function that executes an action and calls the provided callback with
- * an optional error.
+ * A `NextFunction` is a function that returns a Promise that may reject with an Error or
+ * fulfill with undefined.
  *
  * @typedef {Function} NextFunction
- * @param {OptionCallback<Error>} callback
+ * @returns Promise
  * @private
  */
 
+const CLOSE_EVENT_NAME = "close";
+const ERROR_EVENT_NAME = "error";
 const TOKEN_EVENT_NAME = "token";
 
 /**
@@ -50,17 +54,31 @@ class EventCollector {
 	constructor(adaptor) {
 		this.adaptor = adaptor;
 		this.events = [];
-		this.collector = (event) => {
+		this.error = null;
+
+		/*
+		 * Use functions as props so that `this` can be used correctly,
+		 * and the function reference can be used to stop listening.
+		 */
+		this._onToken = (event) => {
 			this.events.push(event);
+		}
+
+		this._onError = (err) => {
+			this.stopCollecting();
+
+			this.error = err;
 		}
 	}
 
 	startCollecting() {
-		this.adaptor.on(TOKEN_EVENT_NAME, this.collector)
+		this.adaptor.on(ERROR_EVENT_NAME, this._onError);
+		this.adaptor.on(TOKEN_EVENT_NAME, this._onToken);
 	}
 
 	stopCollecting() {
-		this.adaptor.off(TOKEN_EVENT_NAME, this.collector)
+		this.adaptor.off(TOKEN_EVENT_NAME, this._onToken);
+		this.adaptor.off(ERROR_EVENT_NAME, this._onError)
 	}
 
 	clear() {
@@ -69,74 +87,32 @@ class EventCollector {
 }
 
 /**
- * @template {any} A
+ * Promisifies a callback-accepting function to return a Promise.
  *
- * @interface Optional<A>
+ * Works by taking a function that accepts a `NodeCallback` as an argument. When the callback
+ * is invoked, the Promise will be settled. If the callback is invoked with an Error, the
+ * Promise will be rejected with that error. Else it is fulfilled with `undefined`.
  *
- * A simple sum type that encapsulates an Optional value or not.
+ * This can be used to chain callback accepting functions together as Promises have a
+ * well-defined interface for composing Promise returning functions together.
  *
+ * @param {(cb: NodeCallback) => void} fn
+ * @return {Promise<void>}
  * @private
  */
+const promisify = (fn) =>
+	new Promise((resolve, reject) => {
+		fn((err) => {
+			if (err) {
+				reject(err)
+			}
+			else {
+				resolve()
+			}
+		})
+	})
 
-/**
- * Unwraps the Optional by calling `onNothing` if the Optional holds no value,
- * or `onSomething` with the wrapped value
- *
- * @template {any} A
- * @function
- * @name Optional#either
- * @param {() => void} onNothing
- * @param {(A) => void} onSomething
- */
-
-/**
- * @param value
- * @return Optional
- * @constructor
- */
-const Some = (value) => {
-	/**
-	 * @implements Optional
-	 */
-	return {
-		either(onNothing, onSomething) {
-			onSomething(value)
-		}
-	}
-}
-
-/**
- * @return Optional
- * @constructor
- */
-const None = () => {
-	/**
-	 * @implements Optional
-	 */
-	return {
-		either(onNothing, _) {
-			onNothing()
-		}
-	}
-}
-
-/**
- * Returns a NodeCallback that when called will call the OptionCallback with an Optional.
- *
- * @param {OptionCallback} callback
- * @return NodeCallback
- */
-const toNodeCallback = (callback) =>
-	(err) => { callback(err ? Some(err) : None()) }
-
-/**
- * Returns an OptionCallback that when called will call the NodeCallback.
- *
- * @param {NodeCallback} callback
- * @return OptionCallback
- */
-const fromNodeCallback = (callback) =>
-	(optional) => { optional.either(callback, callback) }
+const emptyHandler = () => {}
 
 /**
  * A widespread pattern with streaming parsers is to emit events when tokens are parsed from an
@@ -172,7 +148,8 @@ const fromNodeCallback = (callback) =>
  * `TokenisingStream` generic, an `EventAdaptor` must be provided using the `adaptor` constructor
  * option. The adaptor is responsible for collecting events from the delegate and emitting them
  * via the `token` event for collection by the stream. If an error occurs in the delegate
- * writing a chunk, the error will be passed to the `_transform` callback.
+ * writing a chunk, the error will be passed to the `_transform` callback. If an error event
+ * is emitted by the event adaptor, it will be passed to the `_transform` callback.
  *
  * When the `TokenisingStream` instance is closed/flushed it will end the delegate Writable.
  * As this may see more events emitted, the stream will collect and push them before closing
@@ -183,6 +160,7 @@ const fromNodeCallback = (callback) =>
  * [3]: https://nodejs.org/en/learn/modules/backpressuring-in-streams
  */
 class TokenisingStream extends InflatingTransform {
+	static ERROR_EVENT_NAME = ERROR_EVENT_NAME;
 	static TOKEN_EVENT_NAME = TOKEN_EVENT_NAME;
 
 	/**
@@ -218,31 +196,16 @@ class TokenisingStream extends InflatingTransform {
 	 * need to be changed.
 	 */
 	_transform(chunk, encoding, callback) {
-		/** @type NextFunction */
-		const writeToDelegate = (next) => {
-			/*
-			 * There is a theoretical pathological case here where the delegate never emits any tokens
-			 * and the delegate write buffer overflows as we're ignoring the result from `write` and
-			 * will keep on writing chunks. However, in practice this would be unlikely to occur.
-			 */
-			this.delegate.write(chunk, encoding, toNodeCallback(next))
-		};
-
-		this._doWhileCollecting(writeToDelegate, callback);
+		this._doWhileCollecting(() => this._writeToDelegate(chunk, encoding), callback);
 	}
 
 	_flush(callback) {
-		/** @type OptionCallback */
-		const done = (maybeError) =>
-			maybeError.either(() => { super._flush(callback) }, callback)
+		/** @type NodeCallback */
+		const done = (err) => {
+			err ? callback(err) : super._flush(callback)
+		}
 
-		/** @type NextFunction */
-		const closeDelegate = (next) => { this.delegate.end(toNodeCallback(next)) };
-
-		this._doWhileCollecting(
-			closeDelegate,
-			toNodeCallback(done)
-		);
+		this._doWhileCollecting(() => this._closeDelegate(), done);
 	}
 
 	*_inflate(chunk, encoding) {
@@ -253,17 +216,35 @@ class TokenisingStream extends InflatingTransform {
 		}
 	}
 
-	_listenForDelegateEvents() {
+	_writeToDelegate(chunk, encoding) {
 		/*
-		 * Node streams not only pass the error to the callback passed to `write`, but will also
-		 * emit the error as an event. If nothing is listening, the node runtime will treat it as an
-		 * uncaught error. We register an empty handler to avoid this.
+		 * There is a theoretical pathological case here where the delegate never emits any tokens
+		 * and the delegate write buffer overflows as we're ignoring the result from `write` and
+		 * will keep on writing chunks. However, in practice this would be unlikely to occur.
 		 */
-		this.delegate.on("error", emptyHandler);
+		return promisify((cb) => {
+			this.delegate.write(chunk, encoding, cb)
+		})
+	}
 
-		// on close, remove handlers.
-		this.delegate.once("close", () => {
-			this.delegate.off("error", emptyHandler)
+	_closeDelegate() {
+		return promisify((cb) => {
+			let err;
+
+			const onError = (e) => {
+				err = e
+			}
+
+			const onClose = () => {
+				this.delegate.off(ERROR_EVENT_NAME, onError);
+
+				cb(err);
+			}
+
+			this.delegate.on(ERROR_EVENT_NAME, onError);
+			this.delegate.once(CLOSE_EVENT_NAME, onClose);
+
+			this.delegate.end()
 		});
 	}
 
@@ -278,21 +259,66 @@ class TokenisingStream extends InflatingTransform {
 	 * @private
 	 */
 	_doWhileCollecting(next, done) {
-		this.collector.clear();
-		this.collector.startCollecting();
+		this._startCollectingTokens();
 
-		next((maybeError) => {
-			this.collector.stopCollecting();
+		next()
+			.then(() => this._stopCollectingTokens())
+			.then(() => this._pushCollectedTokens())
+			.then(done, done)
+	}
 
-			maybeError.either(
-				// if any events have been collected, push them.
-				() => { super._transform(this.collector.events, undefined, done) },
-				done
-			);
+	/**
+	 * @private
+	 */
+	_checkCollectorForError() {
+		return this.collector.error ? Promise.reject(this.collector.error) : Promise.resolve();
+	}
+
+	_listenForDelegateEvents() {
+		/*
+		 * Node streams not only pass the error to the callback passed to `write`, but will also
+		 * emit the error as an event. If nothing is listening, the node runtime will treat it as an
+		 * uncaught error. We register an empty handler to avoid this.
+		 */
+		this.delegate.on(ERROR_EVENT_NAME, emptyHandler);
+
+		// on close, remove handlers.
+		this.delegate.once(CLOSE_EVENT_NAME, () => {
+			this.delegate.off(ERROR_EVENT_NAME, emptyHandler)
 		});
 	}
-}
 
-const emptyHandler = () => {}
+	/**
+	 * Pushes any collected tokens through the stream.
+	 *
+	 * @private
+	 */
+	_pushCollectedTokens() {
+		return promisify((cb) => { super._transform(this._collectedTokens(), undefined, cb) })
+			.then(() => this._checkCollectorForError())
+	}
+
+	/**
+	 * @private
+	 */
+	_collectedTokens() {
+		return this.collector.events;
+	}
+
+	/**
+	 * @private
+	 */
+	_startCollectingTokens() {
+		this.collector.clear();
+		this.collector.startCollecting();
+	}
+
+	/**
+	 * @private
+	 */
+	_stopCollectingTokens() {
+		this.collector.stopCollecting();
+	}
+}
 
 module.exports = TokenisingStream;
