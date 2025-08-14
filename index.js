@@ -271,14 +271,7 @@ class TokenisingStream extends InflatingTransform {
 	 * @private
 	 */
 	_checkCollectorForError() {
-		return new Promise((resolve, reject) => {
-			if (this.collector.error) {
-				reject(this.collector.error)
-			}
-			else {
-				resolve()
-			}
-		})
+		return this.collector.error ? Promise.reject(this.collector.error) : Promise.resolve();
 	}
 
 	_listenForDelegateEvents() {
