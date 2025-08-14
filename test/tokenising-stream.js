@@ -90,6 +90,14 @@ class TestWritable extends Writable {
 	}
 }
 
+class FakeWritable extends EventEmitter {
+	write(chunk, encoding) {}
+
+	end() {
+		this.emit("close");
+	}
+}
+
 describe("TokenisingStream", function() {
 	describe("streaming", function() {
 		it("should stream events", async function() {
@@ -123,7 +131,17 @@ describe("TokenisingStream", function() {
 			await pipeline;
 
 			assertThat("Still listening for events", stream.adaptor.listenerCount("event"), equalTo(0));
-		})
+		});
+
+		it("should work with fake writable streams", async function() {
+			const stream = newTokenisingStream({
+				delegate: new FakeWritable()
+			});
+			const pipeline = newPipeline(stream);
+			stream.end(numbersText());
+
+			await pipeline;
+		});
 	});
 
 	describe("flushing", function() {
