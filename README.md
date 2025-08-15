@@ -52,8 +52,44 @@ as well.
 $ npm install tokenising-stream
 ```
 
+For a full example see the [examples](./examples)
+
 ```javascript
-// TODO
+class SomeEventAdaptor extends EventEmitter {
+  constructor(delegate) {
+    super();
+
+    delegate.on("something", (token) => {
+      this.emit(TokenisingStream.TOKEN_EVENT_NAME, Object.assign({}, token, {
+        type: "something"
+      }));
+    })
+
+    delegate.on("error", (error) => {
+      this.emit(TokenisingStream.ERROR_EVENT_NAME, error);
+    })
+  }
+}
+
+// tokenisingStream :: () -> TokenisingStream
+const tokenisingStream = () => {
+  const delegate = createParserStream()
+
+  return new TokenisingStream({
+    delegate,
+    adaptor: new SomeEventAdaptor(delegate)
+  })
+}
+
+// main :: () -> Promise Unit
+const main = () =>
+  pipeline(
+    getInputStream(),
+    tokenisingStream(),
+    process.stdout
+  )
+
+main().catch(console.error);
 ```
 
 ## Tests
