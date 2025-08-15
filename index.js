@@ -118,7 +118,7 @@ const emptyHandler = () => {}
  * A widespread pattern with streaming parsers is to emit events when tokens are parsed from an
  * input string. Examples include SAX libraries, parse5 (HTML), and other streaming parsers on
  * NPM. The parser is often wrapped in a `Writable` stream to allow input strings to be streamed
- * from a source and piped into the parser. For example, a file stream or a HTTP response
+ * from a source and piped into the parser. For example, a file stream or an HTTP request
  * stream. The parser stream forwards events from the wrapped parser to listeners registered on
  * the stream; as streams are `EventEmitter`s.
  *
@@ -148,7 +148,7 @@ const emptyHandler = () => {}
  * `TokenisingStream` generic, an `EventAdaptor` must be provided using the `adaptor` constructor
  * option. The adaptor is responsible for collecting events from the delegate and emitting them
  * via the `token` event for collection by the stream. If an error occurs in the delegate
- * writing a chunk, the error will be passed to the `_transform` callback. If an error event
+ * writing a chunk, the error will be passed to the `_transform` callback. If an `error` event
  * is emitted by the event adaptor, it will be passed to the `_transform` callback.
  *
  * When the `TokenisingStream` instance is closed/flushed it will end the delegate Writable.
