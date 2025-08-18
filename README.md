@@ -52,7 +52,7 @@ as well.
 $ npm install tokenising-stream
 ```
 
-For a full example see the [examples](./examples)
+For a full example, see the [examples](./examples)
 
 ```javascript
 class SomeEventAdaptor extends EventEmitter {
@@ -71,21 +71,18 @@ class SomeEventAdaptor extends EventEmitter {
   }
 }
 
-// tokenisingStream :: () -> TokenisingStream
-const tokenisingStream = () => {
-  const delegate = createParserStream()
-
-  return new TokenisingStream({
-    delegate,
-    adaptor: new SomeEventAdaptor(delegate)
+// tokenisingStream :: Writable -> TokenisingStream
+const tokenisingStream = (parser) =>
+  new TokenisingStream({
+    delegate: parser,
+    adaptor: new SomeEventAdaptor(parser)
   })
-}
 
 // main :: () -> Promise Unit
 const main = () =>
   pipeline(
     getInputStream(),
-    tokenisingStream(),
+    tokenisingStream(createParserStream()),
     process.stdout
   )
 
