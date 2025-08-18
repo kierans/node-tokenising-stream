@@ -91,10 +91,20 @@ class TestWritable extends Writable {
 }
 
 class FakeWritable extends EventEmitter {
+	constructor() {
+		super();
+
+		this.endEvent = "finish"
+	}
+
 	write(chunk, encoding) {}
 
 	end() {
-		this.emit("close");
+		this.emit(this.endEvent);
+	}
+
+	setEndEvent(endEvent) {
+		this.endEvent = endEvent;
 	}
 }
 
@@ -142,6 +152,32 @@ describe("TokenisingStream", function() {
 
 			await pipeline;
 		});
+
+		describe("events", function() {
+			const events = [
+				"close",
+				"finish",
+				"end"
+			]
+
+			let delegate;
+
+			beforeEach(function() {
+				delegate = new FakeWritable();
+			});
+
+			events.forEach((event) => {
+				it(`should recognise delegate ended with '${event}' event`, async function() {
+					delegate.setEndEvent(event);
+
+					const stream = newTokenisingStream({ delegate });
+					const pipeline = newPipeline(stream);
+					stream.end(numbersText());
+
+					await pipeline;
+				});
+			})
+		});
 	});
 
 	describe("flushing", function() {
@@ -188,7 +224,7 @@ describe("TokenisingStream", function() {
 		});
 	});
 
-	describe("events", function() {
+	describe("adaptor events", function() {
 		it("should proxy error event from adaptor", async function() {
 			const stream = newTokenisingStream({});
 			const pipeline = newPipeline(stream);

@@ -239,20 +239,33 @@ class TokenisingStream extends InflatingTransform {
 
 	_closeDelegate() {
 		return promisify((cb) => {
+			/*
+			 * Some parsing libraries aren't true Writable's (eg: sax). They don't honour the same
+			 * contract as Writables in that they emit different events to indicate the stream is
+			 * ended. We want to listen for all of them, and act on the first event heard.
+			 */
+			const endEvents = [
+				"end",
+				"close",
+				"finish"
+			]
+
 			let err;
 
+			// if there is an error ending the delegate.
 			const onError = (e) => {
 				err = e
 			}
 
-			const onClose = () => {
+			const onEndEvent = () => {
+				endEvents.forEach((event) => this.delegate.off(event, onEndEvent))
 				this.delegate.off(ERROR_EVENT_NAME, onError);
 
 				cb(err);
 			}
 
 			this.delegate.on(ERROR_EVENT_NAME, onError);
-			this.delegate.once(CLOSE_EVENT_NAME, onClose);
+			endEvents.forEach((event) => this.delegate.on(event, onEndEvent));
 
 			this.delegate.end()
 		});
