@@ -224,7 +224,7 @@ class TokenisingStream extends InflatingTransform {
 		 */
 		return promisify((cb) => {
 			/*
-			 * Some parser libraries aren't true Writable's (eg: sax). They duck type the `write` and
+			 * Some parser libraries aren't true Writables (eg: sax). They duck type the `write` and
 			 * `end` methods but don't honour the callback.
 			 */
 			if (this.delegate.write.length < 3) {
@@ -240,7 +240,7 @@ class TokenisingStream extends InflatingTransform {
 	_closeDelegate() {
 		return promisify((cb) => {
 			/*
-			 * Some parsing libraries aren't true Writable's (eg: sax). They don't honour the same
+			 * Some parsing libraries aren't true Writables (eg: sax). They don't honour the same
 			 * contract as Writables in that they emit different events to indicate the stream is
 			 * ended. We want to listen for all of them, and act on the first event heard.
 			 */
