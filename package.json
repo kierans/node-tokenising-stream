@@ -1,6 +1,6 @@
 {
   "name": "tokenising-stream",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "A Transform stream that pipes parsed tokens emitted from a delegate Writable",
   "main": "index.js",
   "types": "index.d.ts",
