@@ -18,7 +18,7 @@ const {
 	throws,
 } = require("hamjest");
 
-const TokenisingStream = require("../index");
+const { TokenisingStream } = require("../index");
 
 const NUM_EVENTS = 3;
 

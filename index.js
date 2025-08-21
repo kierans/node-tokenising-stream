@@ -1,4 +1,4 @@
-const InflatingTransform = require("inflating-transform");
+const { InflatingTransform } = require("inflating-transform");
 
 /**
  * @event EventAdaptor#token
@@ -208,7 +208,7 @@ class TokenisingStream extends InflatingTransform {
 		this._doWhileCollecting(() => this._closeDelegate(), done);
 	}
 
-	*_inflate(chunk, encoding) {
+	*_inflate(chunk, _) {
 		for (const item of chunk) {
 			yield {
 				chunk: item
@@ -344,4 +344,6 @@ class TokenisingStream extends InflatingTransform {
 	}
 }
 
-module.exports = TokenisingStream;
+module.exports = {
+	TokenisingStream
+};

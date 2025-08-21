@@ -4,7 +4,7 @@
   "private": true,
   "description": "Examples using node-tokenising-stream",
   "dependencies": {
-    "inflating-transform": "^0.4.1",
+    "inflating-transform": "^0.5.0",
     "sax": "^1.4.1"
   }
 }
