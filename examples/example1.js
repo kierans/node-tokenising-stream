@@ -3,9 +3,9 @@ const { EventEmitter } = require("node:events");
 const { pipeline } = require("node:stream/promises");
 
 const sax = require("sax");
-const InflatingTransform = require("inflating-transform");
+const { InflatingTransform } = require("inflating-transform");
 
-const TokenisingStream = require("../index");
+const { TokenisingStream } = require("../index");
 
 /*
  * This example demonstrates the use of a TokenisingStream in a stream flow

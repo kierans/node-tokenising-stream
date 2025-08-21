@@ -3,6 +3,7 @@
   "version": "0.2.1",
   "description": "A Transform stream that pipes parsed tokens emitted from a delegate Writable",
   "main": "index.js",
+  "types": "index.d.ts",
   "scripts": {
     "test": "mocha test"
   },
@@ -19,6 +20,7 @@
   ],
   "files": [
     "index.js",
+    "index.d.ts",
     "README.md"
   ],
   "author": "Kieran Simpson <kierans777@gmail.com>",
@@ -33,6 +35,6 @@
     "mocha": "^11.7.1"
   },
   "dependencies": {
-    "inflating-transform": "^0.4.1"
+    "inflating-transform": "^0.5.0"
   }
 }

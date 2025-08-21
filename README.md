@@ -1,6 +1,7 @@
 # tokenising-stream
 
 A Node.js [Transform stream][1] that pipes parsed tokens emitted from a delegate [Writable][2].
+Includes TypeScript type definitions.
 
 A widespread pattern with streaming parsers is to emit events when tokens are parsed from an
 input string. Examples include SAX libraries, parse5 (HTML), and other streaming parsers on
@@ -55,6 +56,11 @@ $ npm install tokenising-stream
 For a full example, see the [examples](./examples)
 
 ```javascript
+const EventEmitter = require("node:events")
+const { pipeline } = require("node:stream/promises")
+
+const { TokenisingStream } = require("tokenising-stream")
+
 class SomeEventAdaptor extends EventEmitter {
   constructor(delegate) {
     super();
